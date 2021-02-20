@@ -1,9 +1,25 @@
 <script>
- function bull() {
-     console.log('bull clicked')
- }
+    function bull() {
+        console.log('bull clicked')
+    }
+
+    function dropHandler(ev) {
+        console.log(ev);
+    }
 </script>
+
+<style>
+    #drop_zone {
+        border: 5px solid blue;
+        width: 200px;
+        height: 100px;
+    }
+</style>
 
 <button onclick="bull()">click me</button>
 
 Hello word!
+
+<div id="drop_zone" ondrop="dropHandler(event);">
+    <p>Drag one or more files to this Drop Zone ...</p>
+</div>
