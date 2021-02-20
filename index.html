@@ -1,25 +1,147 @@
+<html>
 <script>
-    function bull() {
-        console.log('bull clicked')
+
+    let cookies = document.cookie.split('; ').reduce((prev, current) => {
+        const [name, value] = current.split('=');
+        prev[name] = value;
+        return prev
+    }, {});
+    if (cookies.chargeCode) {
+        document.getElementById("chargecode").value = cookies.chargeCode;
     }
 
-    function dropHandler(ev) {
-        console.log(ev);
+
+    function calculateDataAndScripts() {
+        saveChargeCode();
+        if (!allInputsFilled()) {
+            return;
+        }
+
+        const worklogRecords = getRecordsAndCleanUp();
+        const workedHoursPerDay = aggregateDataByDate(worklogRecords);
+        const sortedDataByDate = Object.keys(workedHoursPerDay)
+            .map((key) => [key, workedHoursPerDay[key]])
+            .sort((a, b) => a[0].localeCompare(b[0]));
+        const checkSum = Object.values(workedHoursPerDay).reduce((acc, cur) => acc + cur);
+        const formattedAggregatedData = sortedDataByDate.reduce((acc, item) => `${acc}\n${item[0]}\t${item[1]}`, '');
+
+        document.getElementById("aggregationByDate").innerHTML = 'Aggregations by date:\n' + formattedAggregatedData;
+        document.getElementById("aggregationByDate").innerHTML += "\n-------------------------\n" + "Hours checksum: " + checkSum;
+        document.getElementById("generatedJs").innerHTML = generateJS(sortedDataByDate);
+    }
+
+    function saveChargeCode() {
+        var cc = document.getElementById("chargecode").value;
+        if (cc) {
+            document.cookie = `chargecode=${cc};`;
+        }
+    }
+
+    function allInputsFilled() {
+        let errors = '';
+        if (!document.getElementById("worklogsData").value) {
+            errors += "Missing worlogs data. ";
+        }
+        if (!document.getElementById("chargecode").value) {
+            errors += "Missing charge code. ";
+        }
+        document.getElementById("detectedErrors").innerHTML = errors;
+        return errors.length == 0;
+    }
+
+    function getRecordsAndCleanUp() {
+        try {
+            const jsonString = document.getElementById("worklogsData").value;
+            const worklogJson = JSON.parse(jsonString.replace("\'", ""));
+            return worklogJson.records
+        } catch (e) {
+            document.getElementById("detectedErrors").innerHTML = 'Not valid JSON!';
+            throw e;
+        }
+
+    }
+
+    function aggregateDataByDate(worklogRecords) {
+        return worklogRecords.reduce((workedHoursPerDay, cur) => {
+            const worklogDate = cur.date;
+            const worklogHours = Number(cur.worked_hours);
+            if (!workedHoursPerDay[worklogDate]) {
+                workedHoursPerDay[worklogDate] = 0;
+            }
+            workedHoursPerDay[worklogDate] += worklogHours;
+            return workedHoursPerDay;
+        }, {});
+    }
+
+    function generateJS(workedHoursPerDay) {
+        let generatedJS = [];
+        const startHour = 9;
+        let chargeCode = document.getElementById("chargecode").value;
+        for (const item of workedHoursPerDay) {
+            let endHour = -1;
+            let isPm = -1;
+            const hoursWorked = Number(item[1]);
+            const dayIndex = Number(item[0].split('-')[2]) - 1;
+            if (hoursWorked + startHour > 12) {
+                endHour = Math.floor(hoursWorked) + startHour - 12;
+                isPm = 1;
+            } else {
+                endHour = Math.floor(hoursWorked) + startHour;
+                isPm = 0;
+            }
+            var endMinutes = (hoursWorked % 1) * 60;
+
+            generatedJS.push(`// ${item[0]}`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.regularHours']").value = ${hoursWorked};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.startHourM']").value = ${startHour};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.endHourM']").value = ${endHour};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.endMinute']").value = ${endMinutes};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.endMeridiem']").value = ${isPm};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.regularHours']").dispatchEvent(new Event('blur'));`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.noBreakTaken1']").checked = true;`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.customFields0.value']").value = "${chargeCode}";`);
+        }
+        return generatedJS.reduce((acc, cur) => acc + "\n" + cur);
+    }
+
+    function copyGeneragedJs() {
+        let textarea = document.getElementById("generatedJs");
+        textarea.select();
+        document.execCommand("copy");
     }
 </script>
 
-<style>
-    #drop_zone {
-        border: 5px solid blue;
-        width: 200px;
-        height: 100px;
-    }
-</style>
+<head></head>
 
-<button onclick="bull()">click me</button>
+<body>
+    <div style="overflow: hidden">
+        <div style="float: left;">
+            <textarea id="worklogsData" name="w3review" rows="20" cols="50" oninput="calculateDataAndScripts()"
+                placeholder="Insert JSON payload"></textarea><br><br>
+            <input type="text" id="chargecode" name="chargecode" placeholder="Charge code"
+                oninput="calculateDataAndScripts()"><br><br>
+        </div>
+        <div style="overflow: hidden; padding-left: 20px; padding-top: 10px;">
+            How to use:
+            <ol>
+                <li>Go to instance to your worklogs, filter your worklogs you want to submit.</li>
+                <li>When filtered, on the table, right click on table header -> Export -> JSON</li>
+                <li>Open the downloaded file, paste it in the JSON field</li>
+                <li>Fill out the charge code with what you want to submit your WLs</li>
+            </ol>
+        </div>
+    </div>
 
-Hello word!
+    <div id="detectedErrors">Fill out Charge code. Copy the JSON from file.</div><br><br>
+    <hr>
+    <div id="results">
+        <div id="checksum"></div>
+        <textarea id="generatedJs" name="textarea" rows="20" cols="100" placeholder="Generated JS to be here"
+            readonly></textarea>
+        <textarea id="aggregationByDate" name="textarea" rows="20" cols="50" placeholder="Aggregations by date"
+            readonly></textarea><br>
+        <button id="copyGeneratedJs" onclick="copyGeneragedJs()">Copy JS</button>
+    </div>
+</body>
 
-<div id="drop_zone" ondrop="dropHandler(event);">
-    <p>Drag one or more files to this Drop Zone ...</p>
-</div>
+</html>
