@@ -32,9 +32,9 @@
     }
 
     function saveChargeCode() {
-        var cc = document.getElementById("chargecode").value;
+        let cc = document.getElementById("chargecode").value;
         if (cc) {
-            document.cookie = `chargecode=${cc};path=/;max-age=31536000"`;
+            document.cookie = `chargecode=${cc};path=/;max-age=31536000`;
         }
     }
 
@@ -90,7 +90,7 @@
                 endHour = Math.floor(hoursWorked) + startHour;
                 isPm = 0;
             }
-            var endMinutes = (hoursWorked % 1) * 60;
+            const endMinutes = (hoursWorked % 1) * 60;
 
             generatedJS.push(`// ${item[0]}`);
             generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.regularHours']").value = ${hoursWorked};`);
@@ -107,10 +107,11 @@
 
     function submittedHoursValidation(sortedDataByDate, checkSum) {
         let maxDay = Math.max(...sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1));
+        let minDay = Math.min(...sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1));
         return `
         // hours sum validation
         let sum = 0;
-        for (let i = 0; i <= ${maxDay}; i++) {
+        for (let i = ${minDay}; i <= ${maxDay}; i++) {
             `+"let totalHours = parseFloat(document.querySelector(`#totalHours${i}`).innerText, 10);"+
             `sum += totalHours;
         } if (sum != ${checkSum}) {
@@ -150,9 +151,9 @@
     <hr>
     <div id="results">
         <div id="checksum"></div>
-        <textarea id="generatedJs" name="textarea" rows="20" cols="100" placeholder="Generated JS to be here"
+        <textarea id="generatedJs" name="textarea" rows="27" cols="100" placeholder="Generated JS to be here"
             readonly></textarea>
-        <textarea id="aggregationByDate" name="textarea" rows="20" cols="50" placeholder="Aggregations by date"
+        <textarea id="aggregationByDate" name="textarea" rows="27" cols="50" placeholder="Aggregations by date"
             readonly></textarea><br>
         <button id="copyGeneratedJs" onclick="copyGeneragedJs()">Copy JS</button>
     </div>
