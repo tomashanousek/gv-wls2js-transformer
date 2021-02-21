@@ -28,13 +28,13 @@
 
         document.getElementById("aggregationByDate").innerHTML = 'Aggregations by date:\n' + formattedAggregatedData;
         document.getElementById("aggregationByDate").innerHTML += "\n-------------------------\n" + "Hours checksum: " + checkSum;
-        document.getElementById("generatedJs").innerHTML = generateJS(sortedDataByDate);
+        document.getElementById("generatedJs").innerHTML = generateJS(sortedDataByDate) + submittedHoursValidation(sortedDataByDate, checkSum);
     }
 
     function saveChargeCode() {
         var cc = document.getElementById("chargecode").value;
         if (cc) {
-            document.cookie = `chargecode=${cc};`;
+            document.cookie = `chargecode=${cc};path=/;max-age=31536000"`;
         }
     }
 
@@ -105,6 +105,19 @@
         return generatedJS.reduce((acc, cur) => acc + "\n" + cur);
     }
 
+    function submittedHoursValidation(sortedDataByDate, checkSum) {
+        let maxDay = Math.max(...sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1));
+        return `
+        // hours sum validation
+        let sum = 0;
+        for (let i = 0; i <= ${maxDay}; i++) {
+            `+"let totalHours = parseFloat(document.querySelector(`#totalHours${i}`).innerText, 10);"+
+            `sum += totalHours;
+        } if (sum != ${checkSum}) {
+            throw 'The sum of hours does not match!';
+        }`;
+    }
+
     function copyGeneragedJs() {
         let textarea = document.getElementById("generatedJs");
         textarea.select();
@@ -128,7 +141,7 @@
                 <li>Go to instance to your worklogs, filter your worklogs you want to submit.</li>
                 <li>When filtered, on the table, right click on table header -> Export -> JSON</li>
                 <li>Open the downloaded file, paste it in the JSON field</li>
-                <li>Fill out the charge code with what you want to submit your WLs</li>
+                <li>Fill out the charge code with what you want to submit your WLs. Last CC is stored to cookies for one year.</li>
             </ol>
         </div>
     </div>
