@@ -1,5 +1,11 @@
 <html>
 <script>
+    var fileData = null;
+
+    function onLoad() {
+        populateCC();
+        initializeDropArea()
+    };
 
     function populateCC() {
         let cookies = document.cookie.split('; ').reduce((prev, current) => {
@@ -9,6 +15,17 @@
         }, {});
         if (cookies.chargecode) {
             document.getElementById("chargecode").value = cookies.chargecode;
+        }
+    }
+
+    function initializeDropArea() {
+        var holder = document.getElementById('holder');
+        holder.ondragover = function (e) { this.className = 'hover'; e.preventDefault(); return false; };
+        holder.ondragend = function () { this.className = ''; return false; };
+        holder.ondrop = function (e) {
+            this.className = '';
+            e.preventDefault();
+            readfiles(e.dataTransfer.files);
         }
     }
 
@@ -40,9 +57,6 @@
 
     function allInputsFilled() {
         let errors = '';
-        if (!document.getElementById("worklogsData").value) {
-            errors += "Missing worlogs data. ";
-        }
         if (!document.getElementById("chargecode").value) {
             errors += "Missing charge code. ";
         }
@@ -52,14 +66,13 @@
 
     function getRecordsAndCleanUp() {
         try {
-            const jsonString = document.getElementById("worklogsData").value;
-            const worklogJson = JSON.parse(jsonString.replace("\'", ""));
+            let dataToProcess = fileData;
+            const worklogJson = JSON.parse(dataToProcess.replace("\'", ""));
             return worklogJson.records
         } catch (e) {
-            document.getElementById("detectedErrors").innerHTML = 'Not valid JSON!';
+            document.getElementById("detectedErrors").innerHTML = "Provided JSON file is not valid or no file was provided.";
             throw e;
         }
-
     }
 
     function aggregateDataByDate(worklogRecords) {
@@ -106,13 +119,14 @@
     }
 
     function submittedHoursValidation(sortedDataByDate, checkSum) {
-        let maxDay = Math.max(...sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1));
-        let minDay = Math.min(...sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1));
+        const dayIndexesToSubmit = sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1);
+        let maxDay = Math.max(...dayIndexesToSubmit);
+        let minDay = Math.min(...dayIndexesToSubmit);
         return `
         // hours sum validation
         let sum = 0;
         for (let i = ${minDay}; i <= ${maxDay}; i++) {
-            `+"let totalHours = parseFloat(document.querySelector(`#totalHours${i}`).innerText, 10);"+
+            `+ "let totalHours = parseFloat(document.querySelector(`#totalHours${i}`).innerText, 10);" +
             `sum += totalHours;
         } if (sum != ${checkSum}) {
             throw 'The sum of hours does not match!';
@@ -124,30 +138,57 @@
         textarea.select();
         document.execCommand("copy");
     }
+
+    function readfiles(files) {
+        for (var i = 0; i < files.length; i++) {
+            reader = new FileReader();
+            reader.readAsDataURL(files[i]);
+            reader.onload = function (event) {
+                try {
+                    fileData = atob(reader.result.replace('data:application/json;base64,', ''));
+                    calculateDataAndScripts();
+                } catch (e) {
+                    document.getElementById("detectedErrors").innerHTML = "Provided JSON file is not valid or no file was provided.";
+                }
+
+            }
+        }
+    }
 </script>
+
+<style>
+    #holder.hover {
+        border: 10px dashed #0c0 !important;
+    }
+</style>
 
 <head></head>
 
-<body onload="populateCC()">
+<body onload="onLoad()">
     <div style="overflow: hidden">
         <div style="float: left;">
-            <textarea id="worklogsData" name="w3review" rows="20" cols="50" oninput="calculateDataAndScripts()"
-                placeholder="Insert JSON payload"></textarea><br><br>
-            <input type="text" id="chargecode" name="chargecode" placeholder="Charge code"
+            <form>
+                <div id="holder"
+                    style="width:372px; height:100px; border: 10px dashed #ccc; text-align: center; line-height: 100px;">
+                    Drop your exrpoted JSON here</div>
+            </form>
+            Charge code:<br>
+            <input type="text" id="chargecode" name="chargecode" placeholder="Insert charge code"
                 oninput="calculateDataAndScripts()" style="width: 372px;"><br><br>
         </div>
         <div style="overflow: hidden; padding-left: 20px; padding-top: 10px;">
             How to use:
             <ol>
                 <li>Go to instance to your worklogs, filter your worklogs you want to submit.</li>
-                <li>When filtered, on the table, right click on table header -> Export -> JSON</li>
-                <li>Open the downloaded file, paste it in the JSON field</li>
-                <li>Fill out the charge code with what you want to submit your WLs. Last CC is stored to cookies for one year.</li>
+                <li>Then on the worklogs table, right click on table header -> Export -> JSON</li>
+                <li>Drag and drop your exported worklogs to the marked area</li>
+                <li>Fill out the charge code with what you want to submit your WLs. Last CC is stored into cookies</li>
+                <li>The JS script is generaged. You can copy the whole script by using the button Copy JS</li>
             </ol>
         </div>
     </div>
 
-    <div id="detectedErrors">Fill out Charge code. Copy the JSON from file.</div><br><br>
+    <div id="detectedErrors"></div><br><br>
     <hr>
     <div id="results">
         <div id="checksum"></div>
