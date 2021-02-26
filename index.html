@@ -96,8 +96,12 @@
             let isPm = -1;
             const hoursWorked = Number(item[1]);
             const dayIndex = Number(item[0].split('-')[2]) - 1;
-            if (hoursWorked + startHour > 12) {
-                endHour = Math.floor(hoursWorked) + startHour - 12;
+            if (Math.floor(hoursWorked) + startHour >= 12) {
+                if (Math.floor(hoursWorked) + startHour == 12) {
+                    endHour = Math.floor(hoursWorked) + startHour;
+                } else {
+                    endHour = Math.floor(hoursWorked) + startHour - 12;
+                }
                 isPm = 1;
             } else {
                 endHour = Math.floor(hoursWorked) + startHour;
