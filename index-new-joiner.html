@@ -1,0 +1,288 @@
+<html>
+<script>
+    var fileData = null;
+
+    function onLoad() {
+        populateCC();
+        initializeDropArea()
+    };
+
+    function populateCC() {
+        let cookies = document.cookie.split('; ').reduce((prev, current) => {
+            const [name, value] = current.split('=');
+            prev[name] = value;
+            return prev
+        }, {});
+        if (cookies.chargecode) {
+            document.getElementById("chargecode").value = cookies.chargecode;
+        }
+        saveChargeCode();
+    }
+
+    function initializeDropArea() {
+        var holder = document.getElementById('holder');
+        holder.ondragover = function (e) { this.className = 'hover'; e.preventDefault(); return false; };
+        holder.ondragend = function () { this.className = ''; return false; };
+        holder.ondrop = function (e) {
+            this.className = '';
+            e.preventDefault();
+            readfiles(e.dataTransfer.files);
+        }
+    }
+
+    function calculateDataAndScripts() {
+        saveChargeCode();
+        if (!allInputsFilled()) {
+            return;
+        }
+
+        const worklogRecords = getRecordsAndCleanUp();
+        const workedHoursPerDay = aggregateDataByDate(worklogRecords);
+        const sortedDataByDate = Object.keys(workedHoursPerDay)
+            .map((key) => [key, workedHoursPerDay[key]])
+            .sort((a, b) => a[0].localeCompare(b[0]));
+        const checkSum = Object.values(workedHoursPerDay).reduce((acc, cur) => acc + cur);
+        const formattedAggregatedData = sortedDataByDate.reduce((acc, item) => `${acc}\n${item[0]}\t${item[1]}`, '');
+
+        document.getElementById("aggregationByDate").innerHTML = 'Aggregations by date:\n' + formattedAggregatedData;
+        document.getElementById("aggregationByDate").innerHTML += "\n-------------------------\n" + "Hours checksum: " + checkSum;
+        document.getElementById("generatedJs").innerHTML = generateJS(sortedDataByDate) + submittedHoursValidation(sortedDataByDate, checkSum);
+    }
+
+    function saveChargeCode() {
+        let cc = document.getElementById("chargecode").value;
+        if (cc) {
+            document.cookie = `chargecode=${cc};path=/;max-age=31536000`;
+        }
+    }
+
+    function allInputsFilled() {
+        let errors = '';
+        if (!document.getElementById("chargecode").value) {
+            errors += "Missing charge code. ";
+        }
+        document.getElementById("detectedErrors").innerHTML = errors;
+        return errors.length == 0;
+    }
+
+    function getRecordsAndCleanUp() {
+        try {
+            let dataToProcess = fileData;
+            const worklogJson = JSON.parse(dataToProcess.replace("\'", ""));
+            return worklogJson.records
+        } catch (e) {
+            document.getElementById("detectedErrors").innerHTML = "Provided JSON file is not valid or no file was provided.";
+            throw e;
+        }
+    }
+
+    function aggregateDataByDate(worklogRecords) {
+        return worklogRecords.reduce((workedHoursPerDay, cur) => {
+            const worklogDate = cur.date;
+            const worklogHours = Number(cur.worked_hours);
+            if (getDayIndex(worklogDate) < 0) {
+                return workedHoursPerDay;
+            }
+            if (!workedHoursPerDay[worklogDate]) {
+                workedHoursPerDay[worklogDate] = 0;
+            }
+            workedHoursPerDay[worklogDate] += worklogHours;
+            return workedHoursPerDay;
+        }, {});
+    }
+
+    function getDayIndex(date) {
+        const dayPart = date.split('-')[2];
+        console.log(isNewJoiner());
+        if (isNewJoiner()) {
+            return dayPart - getNewJoinersDay();
+        }
+        return dayPart - 1;
+    }
+
+    function generateJS(workedHoursPerDay) {
+        let generatedJS = [];
+        const startHour = 9;
+        let chargeCode = document.getElementById("chargecode").value;
+        console.log(workedHoursPerDay);
+        for (const item of workedHoursPerDay) {
+            let endHour = -1;
+            let isPm = -1;
+            const hoursWorked = Number(item[1]);
+            const dayIndex = getDayIndex(item[0]);
+            if (Math.floor(hoursWorked) + startHour >= 12) {
+                if (Math.floor(hoursWorked) + startHour == 12) {
+                    endHour = Math.floor(hoursWorked) + startHour;
+                } else {
+                    endHour = Math.floor(hoursWorked) + startHour - 12;
+                }
+                isPm = 1;
+            } else {
+                endHour = Math.floor(hoursWorked) + startHour;
+                isPm = 0;
+            }
+            const endMinutes = (hoursWorked % 1) * 60;
+
+            generatedJS.push(`// ${item[0]}`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.regularHours']").value = ${hoursWorked};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.startHourM']").value = ${startHour};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.endHourM']").value = ${endHour};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.endMinute']").value = ${endMinutes};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.billingTimeSpans0.endMeridiem']").value = ${isPm};`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.regularHours']").dispatchEvent(new Event('blur'));`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.noBreakTaken1']").checked = true;`);
+            generatedJS.push(`document.querySelector("[id='billingDetailItems${dayIndex}.customFields0.customFields0.value']").value = "${chargeCode}";`);
+        }
+        return generatedJS.reduce((acc, cur) => acc + "\n" + cur);
+    }
+
+    function submittedHoursValidation(sortedDataByDate, checkSum) {
+        const dayIndexesToSubmit = sortedDataByDate.map(item => Number(item[0].split('-')[2]) - 1);
+        let maxDay = Math.max(...dayIndexesToSubmit);
+        let minDay = Math.min(...dayIndexesToSubmit);
+        return `
+        // hours sum validation
+        let sum = 0;
+        for (let i = ${minDay}; i <= ${maxDay}; i++) {
+            `+ "let totalHours = parseFloat(document.querySelector(`#totalHours${i}`).innerText, 10);" +
+            `sum += totalHours;
+        } if (sum != ${checkSum}) {
+            throw 'The sum of hours does not match!';
+        }`;
+    }
+
+    function copyGeneragedJs() {
+        let textarea = document.getElementById("generatedJs");
+        textarea.select();
+        document.execCommand("copy");
+    }
+
+    function readfiles(files) {
+        for (var i = 0; i < files.length; i++) {
+            reader = new FileReader();
+            reader.readAsDataURL(files[i]);
+            reader.onload = function (event) {
+                try {
+                    fileData = atob(reader.result.replace('data:application/json;base64,', ''));
+                    calculateDataAndScripts();
+                } catch (e) {
+                    document.getElementById("detectedErrors").innerHTML = "Provided JSON file is not valid or no file was provided.";
+                }
+
+            }
+        }
+    }
+
+    function newJoinerChanged(isNewJoiner) {
+        if (isNewJoiner) {
+            document.getElementById('newJoinerStartDayBlock').hidden = false;
+        } else {
+            document.getElementById('newJoinerStartDayBlock').hidden = true;
+            document.getElementById("newJoinerStartDay").value = 1;
+            calculateDataAndScripts();
+        }
+    }
+
+    function isNewJoiner() {
+        return document.getElementById("isNewJoiner").checked;
+    }
+
+    function getNewJoinersDay() {
+        return document.getElementById("newJoinerStartDay").value;
+    }
+</script>
+
+<style>
+    #holder.hover {
+        border: 10px dashed #0c0 !important;
+    }
+
+    .tooltip {
+        position: relative;
+        display: inline-block;
+    }
+
+    .tooltip .tooltiptext {
+        visibility: hidden;
+        width: 300px;
+        background-color: rgb(112, 111, 111);
+        color: #fff;
+        text-align: center;
+        border-radius: 6px;
+        padding: 5px 0;
+
+        /* Position the tooltip */
+        position: absolute;
+        z-index: 1;
+        top: -5px;
+        left: 105%;
+    }
+
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+    }
+</style>
+
+<head>
+    <!-- <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+        crossorigin="anonymous"></script> -->
+</head>
+
+<body onload="onLoad()">
+    <div class="container-fluid">
+
+        <div style="overflow: hidden">
+            <div style="float: left;">
+                <form>
+                    <div id="holder"
+                        style="width:372px; height:100px; border: 10px dashed #ccc; text-align: center; line-height: 100px;">
+                        Drop your exrpoted JSON here</div>
+                </form>
+                Charge code*<br>
+                <input type="text" id="chargecode" name="chargecode" placeholder="Insert charge code"
+                    oninput="calculateDataAndScripts()" style="width: 372px;"><br><br>
+                Processing first month of new joiner
+                <div class="tooltip"><img src="question-circle.svg">
+                    <span class="tooltiptext">Check only if you are new joiner filling out the worklogs for the first time</span>
+                </div>
+                <br>
+                <input type="checkbox" id="isNewJoiner" name="isNewJoiner"
+                    onchange="newJoinerChanged(this.checked)"><br><br>
+                <div id="newJoinerStartDayBlock" hidden>
+                    Day of start*<br>
+                    <input type="number" min="1" max="31" id="newJoinerStartDay" name="newJoinerStartDay"
+                        style="width: 372px;" oninput="calculateDataAndScripts()" value="1"><br><br>
+                </div>
+
+            </div>
+            <div style="overflow: hidden; padding-left: 20px; padding-top: 10px;">
+                How to use:
+                <ol>
+                    <li>Go to instance to your worklogs, filter your worklogs you want to submit.</li>
+                    <li>Then on the worklogs table, right click on table header -> Export -> JSON</li>
+                    <li>Drag and drop your exported worklogs to the marked area</li>
+                    <li>Fill out the charge code with what you want to submit your WLs. Last CC is stored into cookies
+                    </li>
+                    <li>The JS script is generaged. You can copy the whole script by using the button Copy JS</li>
+                </ol>
+            </div>
+        </div>
+
+        <div id="detectedErrors"></div><br><br>
+        <hr>
+        <div id="results">
+            <div id="checksum"></div>
+            <textarea id="generatedJs" name="textarea" rows="27" cols="100" placeholder="Generated JS to be here"
+                readonly></textarea>
+            <textarea id="aggregationByDate" name="textarea" rows="27" cols="50" placeholder="Aggregations by date"
+                readonly></textarea><br>
+            <button id="copyGeneratedJs" onclick="copyGeneragedJs()">Copy JS</button>
+        </div>
+    </div>
+
+</body>
+
+</html>
